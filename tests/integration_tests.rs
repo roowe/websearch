@@ -1,11 +1,11 @@
-//! Integration tests for the search SDK
+//! Integration tests for the websearch SDK
 //!
 //! These tests cover edge cases, error handling, and integration between components.
 
 use async_trait::async_trait;
 use std::sync::{Arc, Mutex};
 use tokio::time::Duration;
-use websearch::{error::SearchError, multi_provider::*, types::*, web_search};
+use websearch::{error::SearchError, types::*, web_search};
 
 // Mock provider that can be configured for various test scenarios
 #[derive(Debug, Clone)]
@@ -22,11 +22,6 @@ enum TestProviderBehavior {
     Slow {
         delay_ms: u64,
         then: Box<TestProviderBehavior>,
-    },
-    Conditional {
-        calls_before_success: usize,
-        error: SearchError,
-        success: Vec<SearchResult>,
     },
 }
 
@@ -57,25 +52,6 @@ impl TestProvider {
         )
     }
 
-    fn conditional(
-        name: &str,
-        calls_before_success: usize,
-        error: SearchError,
-        success: Vec<SearchResult>,
-    ) -> Self {
-        Self::new(
-            name,
-            TestProviderBehavior::Conditional {
-                calls_before_success,
-                error,
-                success,
-            },
-        )
-    }
-
-    fn call_count(&self) -> usize {
-        *self.call_count.lock().unwrap()
-    }
 }
 
 #[async_trait]
@@ -85,7 +61,7 @@ impl SearchProvider for TestProvider {
     }
 
     async fn search(&self, _options: &SearchOptions) -> websearch::Result<Vec<SearchResult>> {
-        let current_count = {
+        let _current_count = {
             let mut count = self.call_count.lock().unwrap();
             *count += 1;
             *count
@@ -102,17 +78,6 @@ impl SearchProvider for TestProvider {
                     _ => Err(SearchError::Other(
                         "Nested slow behavior not supported".to_string(),
                     )),
-                }
-            }
-            TestProviderBehavior::Conditional {
-                calls_before_success,
-                error,
-                success,
-            } => {
-                if current_count <= *calls_before_success {
-                    Err(error.clone())
-                } else {
-                    Ok(success.clone())
                 }
             }
         }
@@ -260,78 +225,6 @@ async fn test_error_types_comprehensive() {
 }
 
 #[tokio::test]
-async fn test_multi_provider_resilience() {
-    // Test scenario: First provider intermittently fails, second is reliable
-    let unreliable_provider = TestProvider::conditional(
-        "unreliable",
-        2, // Fail for first 2 calls
-        SearchError::HttpError {
-            status_code: Some(503),
-            message: "Service Unavailable".to_string(),
-            response_body: None,
-        },
-        create_test_results("unreliable", 1),
-    );
-
-    let reliable_provider = TestProvider::success("reliable", create_test_results("reliable", 2));
-
-    let config = MultiProviderConfig::new(MultiProviderStrategy::Failover)
-        .add_provider(Box::new(unreliable_provider.clone()))
-        .add_provider(Box::new(reliable_provider));
-
-    let mut multi_search = MultiProviderSearch::new(config);
-    let options = SearchOptionsMulti {
-        query: "test".to_string(),
-        ..Default::default()
-    };
-
-    // First call: unreliable fails, reliable succeeds
-    let results1 = multi_search.search(&options).await.unwrap();
-    assert_eq!(results1[0].provider, Some("reliable".to_string()));
-
-    // Second call: unreliable still fails, reliable succeeds
-    let results2 = multi_search.search(&options).await.unwrap();
-    assert_eq!(results2[0].provider, Some("reliable".to_string()));
-
-    // Third call: unreliable now succeeds
-    let results3 = multi_search.search(&options).await.unwrap();
-    assert_eq!(results3[0].provider, Some("unreliable".to_string()));
-
-    // Verify call counts
-    assert_eq!(unreliable_provider.call_count(), 3);
-}
-
-#[tokio::test]
-async fn test_sequential_multi_provider_access() {
-    let provider1 = TestProvider::success("provider1", create_test_results("provider1", 1));
-    let provider2 = TestProvider::success("provider2", create_test_results("provider2", 1));
-
-    let config = MultiProviderConfig::new(MultiProviderStrategy::LoadBalance)
-        .add_provider(Box::new(provider1))
-        .add_provider(Box::new(provider2));
-
-    let mut multi_search = MultiProviderSearch::new(config);
-    let options = SearchOptionsMulti {
-        query: "sequential test".to_string(),
-        ..Default::default()
-    };
-
-    // Perform multiple sequential searches to test load balancing
-    let mut successful_searches = 0;
-    for i in 0..10 {
-        match multi_search.search(&options).await {
-            Ok(results) => {
-                successful_searches += 1;
-                assert!(!results.is_empty(), "Search {i} should return results");
-            }
-            Err(e) => panic!("Search {i} failed: {e:?}"),
-        }
-    }
-
-    assert_eq!(successful_searches, 10, "All searches should succeed");
-}
-
-#[tokio::test]
 async fn test_edge_case_empty_results() {
     let provider = TestProvider::success("empty", vec![]);
 
@@ -439,48 +332,6 @@ async fn test_memory_usage_with_large_content() {
 }
 
 #[tokio::test]
-async fn test_provider_statistics_accuracy() {
-    let fast_provider = TestProvider::slow(
-        "fast",
-        10, // 10ms delay
-        TestProviderBehavior::Success(create_test_results("fast", 1)),
-    );
-    let slow_provider = TestProvider::slow(
-        "slow",
-        100, // 100ms delay
-        TestProviderBehavior::Success(create_test_results("slow", 1)),
-    );
-
-    let config = MultiProviderConfig::new(MultiProviderStrategy::LoadBalance)
-        .add_provider(Box::new(fast_provider))
-        .add_provider(Box::new(slow_provider));
-
-    let mut multi_search = MultiProviderSearch::new(config);
-    let options = SearchOptionsMulti {
-        query: "test".to_string(),
-        ..Default::default()
-    };
-
-    // Perform several searches to build up statistics
-    for _ in 0..4 {
-        let _ = multi_search.search(&options).await.unwrap();
-    }
-
-    let stats = multi_search.get_stats();
-
-    // Both providers should have been called twice (round-robin)
-    assert_eq!(stats["fast"].total_requests, 2);
-    assert_eq!(stats["slow"].total_requests, 2);
-    assert_eq!(stats["fast"].successful_requests, 2);
-    assert_eq!(stats["slow"].successful_requests, 2);
-
-    // Fast provider should have lower average response time
-    assert!(stats["fast"].avg_response_time_ms < stats["slow"].avg_response_time_ms);
-    assert!(stats["fast"].avg_response_time_ms >= 10.0);
-    assert!(stats["slow"].avg_response_time_ms >= 100.0);
-}
-
-#[tokio::test]
 async fn test_search_options_validation() {
     let provider = TestProvider::success("test", create_test_results("test", 1));
 
@@ -529,6 +380,24 @@ async fn test_debug_logging_does_not_crash() {
     };
 
     // Should not crash even with debug logging enabled
+    let results = web_search(options).await.unwrap();
+    assert_eq!(results.len(), 1);
+}
+
+#[tokio::test]
+async fn test_slow_provider() {
+    let provider = TestProvider::slow(
+        "slow",
+        50, // 50ms delay
+        TestProviderBehavior::Success(create_test_results("slow", 1)),
+    );
+
+    let options = SearchOptions {
+        query: "test".to_string(),
+        provider: Box::new(provider),
+        ..Default::default()
+    };
+
     let results = web_search(options).await.unwrap();
     assert_eq!(results.len(), 1);
 }

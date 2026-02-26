@@ -1,26 +1,20 @@
-//! # Search SDK - Rust Implementation
+//! # WebSearch - Rust Implementation
 //!
-//! A high-performance Rust SDK for integrating with multiple web search providers through a single, consistent interface.
-//!
-//! Initially based on the [PlustOrg/search-sdk](https://github.com/PlustOrg/search-sdk) TypeScript library,
-//! this Rust implementation has evolved to include additional features such as multi-provider search strategies,
-//! load balancing, failover support, and performance monitoring.
+//! A simple Rust SDK for web search via DuckDuckGo and ArXiv.
 //!
 //! ## Quick Start
 //!
 //! ```rust
-//! use websearch::{web_search, providers::google::GoogleProvider, SearchOptions};
+//! use websearch::{web_search, providers::DuckDuckGoProvider, SearchOptions};
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     // Configure the Google search provider
-//!     let google = GoogleProvider::new("YOUR_API_KEY", "YOUR_SEARCH_ENGINE_ID")?;
+//!     let duckduckgo = DuckDuckGoProvider::new();
 //!
-//!     // Perform a search
 //!     let results = web_search(SearchOptions {
 //!         query: "Rust programming language".to_string(),
 //!         max_results: Some(5),
-//!         provider: Box::new(google),
+//!         provider: Box::new(duckduckgo),
 //!         ..Default::default()
 //!     }).await?;
 //!
@@ -33,7 +27,6 @@
 //! ```
 
 pub mod error;
-pub mod multi_provider;
 pub mod providers;
 pub mod types;
 pub mod utils;
@@ -55,11 +48,11 @@ pub use types::{DebugOptions, SearchOptions, SearchProvider, SearchResult};
 /// # Examples
 ///
 /// ```rust
-/// use websearch::{web_search, providers::google::GoogleProvider, SearchOptions};
+/// use websearch::{web_search, providers::DuckDuckGoProvider, SearchOptions};
 ///
 /// # #[tokio::main]
 /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-/// let provider = GoogleProvider::new("api_key", "cx_id")?;
+/// let provider = DuckDuckGoProvider::new();
 /// let results = web_search(SearchOptions {
 ///     query: "rust programming".to_string(),
 ///     provider: Box::new(provider),
@@ -116,75 +109,41 @@ pub async fn web_search(options: SearchOptions) -> Result<Vec<SearchResult>> {
 
 /// Get provider-specific troubleshooting information based on error
 fn get_troubleshooting_info(provider_name: &str, error: &SearchError) -> String {
-    let mut suggestions = String::new();
-
     // Common troubleshooting based on error type
     match error {
         SearchError::HttpError {
             status_code: Some(401 | 403),
             ..
         } => {
-            suggestions = "This is likely an authentication issue. Check your API key and make sure it's valid and has the correct permissions.".to_string();
+            "This is likely an authentication issue. Check your API key and make sure it's valid and has the correct permissions.".to_string()
         }
         SearchError::HttpError {
             status_code: Some(400),
             ..
         } => {
-            suggestions = "This is likely due to invalid request parameters. Check your query and other search options.".to_string();
+            "This is likely due to invalid request parameters. Check your query and other search options.".to_string()
         }
         SearchError::HttpError {
             status_code: Some(429),
             ..
         } => {
-            suggestions = "You've exceeded the rate limit for this API. Try again later or reduce your request frequency.".to_string();
+            "You've exceeded the rate limit for this API. Try again later or reduce your request frequency.".to_string()
         }
         SearchError::HttpError {
             status_code: Some(500..=599),
             ..
         } => {
-            suggestions =
-                "The search provider is experiencing server issues. Try again later.".to_string();
-        }
-        _ => {}
-    }
-
-    // Provider-specific troubleshooting
-    match provider_name {
-        "google" => {
-            if suggestions.is_empty() {
-                suggestions = "Make sure your Google API key is valid and has the Custom Search API enabled. Also check if your Search Engine ID (cx) is correct.".to_string();
-            }
-        }
-        "serpapi" => {
-            if suggestions.is_empty() {
-                suggestions = "Check that your SerpAPI key is valid. Verify that you have enough credits remaining in your SerpAPI account.".to_string();
-            }
-        }
-        "brave" => {
-            if suggestions.is_empty() {
-                suggestions = "Ensure your Brave Search API token is valid. Check your subscription status in the Brave Developer Hub.".to_string();
-            }
-        }
-        "searxng" => {
-            if suggestions.is_empty() {
-                suggestions = "Check if your SearXNG instance URL is correct and that the server is running. Verify the format of your search URL.".to_string();
-            }
-        }
-        "duckduckgo" => {
-            if suggestions.is_empty() {
-                suggestions = "You may be making too many requests to DuckDuckGo. Try adding a delay between requests or reduce your request frequency.".to_string();
-            }
+            "The search provider is experiencing server issues. Try again later.".to_string()
         }
         _ => {
-            if suggestions.is_empty() {
-                suggestions = format!(
-                    "Check your {provider_name} API credentials and make sure your search request is valid."
-                );
+            // Provider-specific troubleshooting
+            match provider_name {
+                "duckduckgo" => "You may be making too many requests to DuckDuckGo. Try adding a delay between requests or reduce your request frequency.".to_string(),
+                "arxiv" => "ArXiv may be temporarily unavailable. Try again later or reduce your request frequency.".to_string(),
+                _ => format!("Check your {provider_name} configuration and make sure your search request is valid."),
             }
         }
     }
-
-    suggestions
 }
 
 #[cfg(test)]
@@ -375,27 +334,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_troubleshooting_info_providers() {
-        let providers = vec![
-            ("google", "Google API key"),
-            ("serpapi", "SerpAPI key"),
-            ("brave", "Brave Search API token"),
-            ("searxng", "SearXNG instance URL"),
-            ("duckduckgo", "too many requests"),
-        ];
-
-        let generic_error = SearchError::Other("test error".to_string());
-
-        for (provider, expected_text) in providers {
-            let info = get_troubleshooting_info(provider, &generic_error);
-            assert!(
-                info.contains(expected_text),
-                "Expected troubleshooting for '{provider}' to contain '{expected_text}'"
-            );
-        }
-    }
-
-    #[tokio::test]
     async fn test_web_search_with_arxiv_id_list() {
         let provider = MockProvider::new("arxiv");
         let options = SearchOptions {
@@ -450,7 +388,6 @@ mod tests {
         };
 
         let search_results = web_search(options).await.unwrap();
-        // Note: MockProvider doesn't actually respect max_results, but real providers should
         assert!(search_results.len() >= 2);
     }
 }

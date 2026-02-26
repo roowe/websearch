@@ -2,11 +2,11 @@
 name = "websearch"
 version = "0.1.1"
 edition = "2021"
-description = "High-performance Rust library and CLI tool for multi-provider web search. Supports Google, ArXiv, DuckDuckGo, Tavily AI, and more with aggregation strategies."
+description = "Simple Rust library and CLI for web search via DuckDuckGo and ArXiv"
 license = "MIT"
 repository = "https://github.com/xynehq/websearch"
 homepage = "https://github.com/xynehq/websearch"
-keywords = ["search", "web", "cli", "multi-provider", "library"]
+keywords = ["search", "web", "cli", "duckduckgo", "arxiv"]
 authors = ["Zereraz"]
 readme = "README.md"
 

@@ -3,7 +3,6 @@
 //! These tests ensure the CLI binary works correctly with all flags and options.
 
 use std::process::Command;
-use std::path::Path;
 
 const CLI_BINARY: &str = "websearch";
 
@@ -43,9 +42,7 @@ fn test_cli_help() {
     let (stdout, _stderr, success) = run_cli_command(&["--help"]);
 
     assert!(success, "Help command should succeed");
-    assert!(stdout.contains("Multi-provider web search CLI"));
-    assert!(stdout.contains("multi"));
-    assert!(stdout.contains("providers"));
+    assert!(stdout.contains("Web search CLI"));
     assert!(stdout.contains("--provider"));
     assert!(stdout.contains("--max-results"));
 }
@@ -59,21 +56,6 @@ fn test_cli_version() {
 }
 
 #[test]
-fn test_providers_command() {
-    let (stdout, _stderr, success) = run_cli_command(&["providers"]);
-
-    assert!(success, "Providers command should succeed");
-    assert!(stdout.contains("Available Search Providers"));
-    assert!(stdout.contains("Google"));
-    assert!(stdout.contains("Tavily"));
-    assert!(stdout.contains("DuckDuckGo"));
-    assert!(stdout.contains("ArXiv"));
-
-    // Should show which providers are available vs not
-    assert!(stdout.contains("✅") || stdout.contains("❌"));
-}
-
-#[test]
 fn test_default_search_with_provider() {
     let (stdout, _stderr, success) = run_cli_command(&["--help"]);
 
@@ -82,16 +64,6 @@ fn test_default_search_with_provider() {
     assert!(stdout.contains("--max-results"));
     assert!(stdout.contains("--format"));
     assert!(stdout.contains("arxiv") || stdout.contains("duckduckgo"));
-}
-
-#[test]
-fn test_multi_search_help() {
-    let (stdout, _stderr, success) = run_cli_command(&["multi", "--help"]);
-
-    assert!(success, "Multi search help should succeed");
-    assert!(stdout.contains("Search using multiple providers"));
-    assert!(stdout.contains("--strategy"));
-    assert!(stdout.contains("--providers"));
 }
 
 #[test]
@@ -116,28 +88,6 @@ fn test_invalid_provider() {
     assert!(!success, "Invalid provider should fail");
     // Should show valid options in error
     assert!(stderr.contains("invalid") || stdout.contains("invalid"));
-}
-
-#[test]
-fn test_missing_api_key_error() {
-    // Test that providers requiring API keys show appropriate errors
-    let (stdout, stderr, success) = run_cli_command(&[
-        "test query",
-        "--provider",
-        "google",
-        "--max-results",
-        "1"
-    ]);
-
-    assert!(!success, "Google without API key should fail");
-    let error_output = format!("{}{}", stdout, stderr);
-    assert!(
-        error_output.contains("GOOGLE_API_KEY") ||
-        error_output.contains("environment variable") ||
-        error_output.contains("API key") ||
-        error_output.contains("NotPresent") ||
-        error_output.contains("Error")
-    );
 }
 
 #[test]
@@ -171,22 +121,6 @@ fn test_output_formats() {
         // The format should be mentioned in help
         let help_output = run_cli_command(&["--help"]);
         assert!(help_output.0.contains(format), "Format {} should be in help", format);
-    }
-}
-
-#[test]
-fn test_multi_search_strategies() {
-    let strategies = ["aggregate", "failover", "load-balance"];
-
-    for strategy in &strategies {
-        let (stdout, _stderr, success) = run_cli_command(&[
-            "multi",
-            "--help"
-        ]);
-
-        // The strategy should be mentioned in help
-        assert!(stdout.contains("strategy") || stdout.contains(strategy),
-                "Strategy {} should be mentioned in help", strategy);
     }
 }
 
@@ -249,18 +183,6 @@ fn test_max_results_parameter() {
 }
 
 #[test]
-fn test_json_output_format() {
-    // Test that JSON format is properly structured when it works
-    let (stdout, stderr, success) = run_cli_command(&[
-        "providers" // This should always work and return structured data
-    ]);
-
-    assert!(success, "Providers command should always work");
-    // The output should be human readable for providers command
-    assert!(stdout.contains("Google") || stdout.contains("DuckDuckGo"));
-}
-
-#[test]
 fn test_empty_query_handling() {
     let (stdout, stderr, success) = run_cli_command(&[
         "", // Empty query
@@ -280,32 +202,13 @@ fn test_empty_query_handling() {
 }
 
 #[test]
-fn test_cli_comprehensive_flag_validation() {
-    // Test that all major flags are recognized (even if they fail due to missing APIs)
-    let test_cases = vec![
-        (vec!["test", "--provider", "google"], false), // Should fail without API key
-        (vec!["test", "--provider", "tavily"], false), // Should fail without API key
-        (vec!["test", "--provider", "duckduckgo"], true), // Should work
-        (vec!["multi", "test", "--strategy", "aggregate"], true), // Should work with available providers
-        (vec!["providers"], true), // Should always work
-    ];
+fn test_cli_providers() {
+    // Test that only duckduckgo and arxiv are available
+    let (stdout, _stderr, success) = run_cli_command(&[
+        "--help"
+    ]);
 
-    for (args, should_succeed) in test_cases {
-        let (stdout, stderr, success) = run_cli_command(&args);
-        let combined = format!("{}{}", stdout, stderr);
-
-        if should_succeed {
-            assert!(success || combined.contains("DuckDuckGo") || combined.contains("Available"),
-                    "Command {:?} should succeed or show meaningful output", args);
-        } else {
-            // If it fails, should be due to missing API keys, not invalid flags
-            assert!(
-                combined.contains("API") ||
-                combined.contains("key") ||
-                combined.contains("environment") ||
-                success, // Or it might succeed if user has API keys
-                "Command {:?} should fail due to API keys, not invalid syntax", args
-            );
-        }
-    }
+    assert!(success);
+    assert!(stdout.contains("duckduckgo"));
+    assert!(stdout.contains("arxiv"));
 }
