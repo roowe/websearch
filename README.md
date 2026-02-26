@@ -17,7 +17,7 @@ cargo install --git https://github.com/roowe/websearch.git
 
 # Or add to your Cargo.toml
 [dependencies]
-websearch = "0.1"
+websearch = { git = "https://github.com/roowe/websearch.git" }
 tokio = { version = "1.0", features = ["full"] }
 ```
 
